@@ -1,0 +1,8 @@
+# Ignore Rust build artifacts
+/target/
+
+# MacOS filesystem noise
+.DS_Store
+
+# By default, keep example configs under version control
+# (example.config.json, example.rows.json, snowflake_*.yaml)
