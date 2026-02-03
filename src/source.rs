@@ -178,3 +178,79 @@ fn load_rows_from_file(path: &str) -> Result<Vec<LogicalRow>> {
 
     Ok(rows)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{CommonMappingFields, Mode, SnowflakeConfig, SourceConfig};
+    use anyhow::Result;
+
+    /// Optional Snowflake connectivity smoke test.
+    ///
+    /// This test will only actually hit Snowflake if the following env vars are set:
+    /// - SNOWFLAKE_ACCOUNT
+    /// - SNOWFLAKE_USER
+    /// - SNOWFLAKE_PASSWORD
+    /// - SNOWFLAKE_WAREHOUSE
+    /// - SNOWFLAKE_DATABASE
+    /// - SNOWFLAKE_SCHEMA
+    ///
+    /// Otherwise it returns Ok(()) immediately so it doesn't fail in environments
+    /// without Snowflake credentials configured.
+    #[tokio::test]
+    async fn snowflake_connectivity_smoke_test() -> Result<()> {
+        let account = match std::env::var("SNOWFLAKE_ACCOUNT") {
+            Ok(v) => v,
+            Err(_) => return Ok(()),
+        };
+        let user = match std::env::var("SNOWFLAKE_USER") {
+            Ok(v) => v,
+            Err(_) => return Ok(()),
+        };
+        let password = match std::env::var("SNOWFLAKE_PASSWORD") {
+            Ok(v) => v,
+            Err(_) => return Ok(()),
+        };
+        let warehouse = match std::env::var("SNOWFLAKE_WAREHOUSE") {
+            Ok(v) => v,
+            Err(_) => return Ok(()),
+        };
+        let database = match std::env::var("SNOWFLAKE_DATABASE") {
+            Ok(v) => v,
+            Err(_) => return Ok(()),
+        };
+        let schema = match std::env::var("SNOWFLAKE_SCHEMA") {
+            Ok(v) => v,
+            Err(_) => return Ok(()),
+        };
+
+        let sf_cfg = SnowflakeConfig {
+            account,
+            user,
+            password: Some(password),
+            private_key_path: None,
+            warehouse,
+            database,
+            schema,
+            role: None,
+            fetch_batch_size: None,
+            query_timeout_ms: Some(10_000),
+        };
+
+        let common = CommonMappingFields {
+            name: "snowflake_connectivity_smoke".to_string(),
+            source: SourceConfig {
+                file: None,
+                table: None,
+                select: Some("SELECT 1 AS ONE".to_string()),
+                r#where: None,
+            },
+            mode: Mode::Full,
+            delta: None,
+        };
+
+        let rows = fetch_rows_from_snowflake(&sf_cfg, &common, None).await?;
+        assert!(!rows.is_empty());
+        Ok(())
+    }
+}

@@ -6,6 +6,36 @@ use crate::sink::MappedNode;
 use crate::sink_async::MappedEdge;
 use crate::source::LogicalRow;
 
+/// Neo4j/FalkorDB only allow property values that are primitives or arrays of primitives.
+/// Normalise incoming JSON so that complex values (objects, nested arrays) are stringified.
+fn normalise_property_value(value: JsonValue) -> JsonValue {
+    fn is_primitive(v: &JsonValue) -> bool {
+        matches!(v, JsonValue::Null | JsonValue::Bool(_) | JsonValue::Number(_) | JsonValue::String(_))
+    }
+
+    match value {
+        JsonValue::Null
+        | JsonValue::Bool(_)
+        | JsonValue::Number(_)
+        | JsonValue::String(_) => value,
+        JsonValue::Array(arr) => {
+            if arr.iter().all(is_primitive) {
+                JsonValue::Array(arr)
+            } else {
+                // Fallback: store entire JSON array as a string property
+                let json = serde_json::to_string(&JsonValue::Array(arr))
+                    .unwrap_or_else(|_| "[]".to_string());
+                JsonValue::String(json)
+            }
+        }
+        JsonValue::Object(_) => {
+            // Fallback: store object as its JSON string representation
+            let json = serde_json::to_string(&value).unwrap_or_else(|_| "{}".to_string());
+            JsonValue::String(json)
+        }
+    }
+}
+
 /// Map tabular rows to FalkorDB nodes according to a NodeMappingConfig.
 pub fn map_rows_to_nodes(
     rows: &[LogicalRow],
@@ -14,7 +44,7 @@ pub fn map_rows_to_nodes(
     let mut out = Vec::with_capacity(rows.len());
 
     for (idx, row) in rows.iter().enumerate() {
-        let key_value = row
+        let key_raw = row
             .get(&mapping.key.column)
             .cloned()
             .ok_or_else(|| {
@@ -24,13 +54,14 @@ pub fn map_rows_to_nodes(
                     mapping.key.column
                 )
             })?;
+        let key_value = normalise_property_value(key_raw);
 
         let mut props = JsonMap::new();
         // Always include key property
         props.insert(mapping.key.property.clone(), key_value.clone());
 
         for (prop_name, spec) in &mapping.properties {
-            let val = row.get(&spec.column).cloned().ok_or_else(|| {
+            let val_raw = row.get(&spec.column).cloned().ok_or_else(|| {
                 anyhow!(
                     "Row {} is missing column '{}' required for property '{}'",
                     idx,
@@ -38,6 +69,7 @@ pub fn map_rows_to_nodes(
                     prop_name
                 )
             })?;
+            let val = normalise_property_value(val_raw);
             props.insert(prop_name.clone(), val);
         }
 
@@ -51,10 +83,11 @@ pub fn map_rows_to_nodes(
 fn build_match_props(row: &LogicalRow, specs: &[MatchOn]) -> Result<JsonMap<String, JsonValue>> {
     let mut props = JsonMap::new();
     for spec in specs {
-        let val = row
+        let val_raw = row
             .get(&spec.column)
             .cloned()
             .ok_or_else(|| anyhow!("Missing column '{}' for endpoint match", spec.column))?;
+        let val = normalise_property_value(val_raw);
         props.insert(spec.property.clone(), val);
     }
     Ok(props)
@@ -73,14 +106,16 @@ pub fn map_rows_to_edges(
 
         let edge_key = if let Some(edge_key_spec) = &mapping.key {
             Some(
-                row.get(&edge_key_spec.column)
-                    .cloned()
-                    .ok_or_else(|| {
-                        anyhow!(
-                            "Missing column '{}' for edge key",
-                            edge_key_spec.column
-                        )
-                    })?,
+                normalise_property_value(
+                    row.get(&edge_key_spec.column)
+                        .cloned()
+                        .ok_or_else(|| {
+                            anyhow!(
+                                "Missing column '{}' for edge key",
+                                edge_key_spec.column
+                            )
+                        })?,
+                ),
             )
         } else {
             None
@@ -88,13 +123,14 @@ pub fn map_rows_to_edges(
 
         let mut props = JsonMap::new();
         for (prop_name, spec) in &mapping.properties {
-            let val = row.get(&spec.column).cloned().ok_or_else(|| {
+            let val_raw = row.get(&spec.column).cloned().ok_or_else(|| {
                 anyhow!(
                     "Missing column '{}' required for edge property '{}'",
                     spec.column,
                     prop_name
                 )
             })?;
+            let val = normalise_property_value(val_raw);
             props.insert(prop_name.clone(), val);
         }
 

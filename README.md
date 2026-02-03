@@ -262,3 +262,95 @@ RUST_LOG=debug,snowflake_to_falkordb=debug cargo run --release -- --config cfg.y
 
 - Verify Snowflake connectivity and credentials if you see errors during `fetch_rows_for_mapping`.
 - Verify FalkorDB endpoint and graph name if you see Cypher execution errors.
+
+## Example Snowflake configs
+
+This repo includes two ready-to-use Snowflake configs:
+
+- `snowflake_check.yaml` – simple connectivity check that queries `INFORMATION_SCHEMA.TABLES` with a `WHERE 1 = 0` predicate (no data returned; just validates login and metadata access).
+- `snowflake_menu.yaml` – full example that builds a small menu graph from Snowflake sample data.
+
+Both rely on an environment variable for the Snowflake password:
+
+- In the config you will see `password: $SNOWFLAKE_PASSWORD`.
+- At runtime, `Config::from_file` treats a leading `$` in `snowflake.password` as an environment variable name and substitutes it.
+
+To run the menu example end-to-end (after provisioning the sample data and FalkorDB):
+
+```bash
+export SNOWFLAKE_PASSWORD=...   # password for the Snowflake user
+cargo run --release -- --config snowflake_menu.yaml
+```
+
+This will:
+
+- Read from `SNOWFLAKE_LEARNING_DB.SHAHARBIRON_LOAD_SAMPLE_DATA_FROM_S3.MENU`.
+- Create `MenuItem`, `MenuType`, `TruckBrand`, `ItemCategory`, and `ItemSubcategory` nodes.
+- Create edges such as `(:MenuItem)-[:IN_MENU_TYPE]->(:MenuType)` and `(:MenuItem)-[:SOLD_BY]->(:TruckBrand)`.
+- Load into the `snowflake_menu` graph in FalkorDB.
+
+If you only want to validate Snowflake connectivity without loading data into a meaningful graph, you can instead use:
+
+```bash
+export SNOWFLAKE_PASSWORD=...
+cargo run --release -- --config snowflake_check.yaml
+```
+
+## Tests
+
+A small test suite is provided to validate config parsing, connectivity, and a minimal end-to-end load. All tests live alongside the code in the `src/` modules and can be run with:
+
+```bash
+cargo test
+```
+
+### Pure unit tests
+
+These run entirely in-memory and do not require external services:
+
+- Config parsing tests (`src/config.rs`):
+  - Verify YAML and JSON configs load correctly.
+  - Verify `$ENV_VAR` resolution for `snowflake.password`.
+
+### Optional integration tests (Snowflake & FalkorDB)
+
+The following tests are **no-ops** unless the corresponding environment variables are set. This keeps `cargo test` safe in environments where Snowflake or FalkorDB are not available.
+
+#### Snowflake connectivity
+
+- Test: `source::tests::snowflake_connectivity_smoke_test` (`src/source.rs`).
+- Env vars required for the test to actually hit Snowflake:
+  - `SNOWFLAKE_ACCOUNT`
+  - `SNOWFLAKE_USER`
+  - `SNOWFLAKE_PASSWORD`
+  - `SNOWFLAKE_WAREHOUSE`
+  - `SNOWFLAKE_DATABASE`
+  - `SNOWFLAKE_SCHEMA`
+
+If any of these are missing, the test returns `Ok(())` without running a query. With them set, it runs a small `SELECT 1 AS ONE` via the same Snowflake client code used in production.
+
+#### FalkorDB connectivity
+
+- Test: `sink_async::tests::falkordb_connectivity_smoke_test` (`src/sink_async.rs`).
+- Env vars:
+  - `FALKORDB_ENDPOINT` (e.g. `falkor://127.0.0.1:6379`)
+  - `FALKORDB_GRAPH` (optional, defaults to `snowflake_to_falkordb_test`)
+
+If `FALKORDB_ENDPOINT` is not set, the test is a no-op. Otherwise it connects to FalkorDB and runs a simple `RETURN 1` query.
+
+#### End-to-end file → FalkorDB load
+
+- Test: `orchestrator::tests::end_to_end_file_load_into_falkordb` (`src/orchestrator.rs`).
+- Env vars:
+  - `FALKORDB_ENDPOINT` (required)
+  - `FALKORDB_GRAPH` (optional, defaults to `snowflake_to_falkordb_load_test`)
+
+This test:
+
+- Writes a tiny JSON array to a temp file:
+  - `[{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}]`.
+- Constructs an in-memory config using `source.file` to read that JSON.
+- Defines a simple node mapping (`TestNode` label, `id` and `name` properties).
+- Calls `run_once`, exercising the full source → mapping → async sink → FalkorDB pipeline.
+
+If `FALKORDB_ENDPOINT` is not set, the test returns `Ok(())` without touching FalkorDB.

@@ -1,4 +1,4 @@
-use std::{fs, path::Path};
+use std::{env, fs, path::Path};
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
@@ -189,13 +189,91 @@ impl Config {
             .unwrap_or("")
             .to_lowercase();
 
-        let cfg: Config = match ext.as_str() {
+        let mut cfg: Config = match ext.as_str() {
             "yaml" | "yml" => serde_yaml::from_str(&contents)
                 .with_context(|| format!("Failed to parse YAML config from {}", path_ref.display()))?,
             _ => serde_json::from_str(&contents)
                 .with_context(|| format!("Failed to parse JSON config from {}", path_ref.display()))?,
         };
 
+        // Resolve Snowflake password from environment if the config uses a $VAR reference.
+        if let Some(sf_cfg) = cfg.snowflake.as_mut() {
+            if let Some(ref pw) = sf_cfg.password {
+                if let Some(env_ref) = pw.strip_prefix('$') {
+                    let env_name = env_ref;
+                    let resolved = env::var(env_name).with_context(|| {
+                        format!(
+                            "Environment variable {} referenced by snowflake.password is not set",
+                            env_name
+                        )
+                    })?;
+                    sf_cfg.password = Some(resolved);
+                }
+            }
+        }
+
         Ok(cfg)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use anyhow::Result;
+    use std::{env, fs, path::PathBuf};
+
+    fn write_temp_file(contents: &str, ext: &str) -> PathBuf {
+        let mut path = env::temp_dir();
+        path.push(format!("snowflake_to_falkordb_config_test.{}", ext));
+        fs::write(&path, contents).expect("failed to write temp config file");
+        path
+    }
+
+    #[test]
+    fn config_from_yaml_resolves_env_password() -> Result<()> {
+        let env_var = "SNOWFLAKE_TEST_PASSWORD";
+        env::set_var(env_var, "super-secret");
+
+        let yaml = r#"
+            snowflake:
+              account: "acc"
+              user: "user"
+              password: "$SNOWFLAKE_TEST_PASSWORD"
+              warehouse: "wh"
+              database: "db"
+              schema: "public"
+            falkordb:
+              endpoint: "falkor://127.0.0.1:6379"
+              graph: "test"
+            mappings: []
+        "#;
+
+        let path = write_temp_file(yaml, "yaml");
+        let cfg = Config::from_file(&path)?;
+        let sf = cfg.snowflake.expect("expected snowflake config");
+        assert_eq!(sf.password.as_deref(), Some("super-secret"));
+        Ok(())
+    }
+
+    #[test]
+    fn config_from_json_parses_basic_fields() -> Result<()> {
+        let json = r#"
+            {
+              "snowflake": null,
+              "falkordb": {
+                "endpoint": "falkor://localhost:6379",
+                "graph": "test_graph"
+              },
+              "state": null,
+              "mappings": []
+            }
+        "#;
+
+        let path = write_temp_file(json, "json");
+        let cfg = Config::from_file(&path)?;
+        assert!(cfg.snowflake.is_none());
+        assert_eq!(cfg.falkordb.endpoint, "falkor://localhost:6379");
+        assert_eq!(cfg.falkordb.graph, "test_graph");
+        Ok(())
     }
 }

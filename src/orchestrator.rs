@@ -353,3 +353,86 @@ pub async fn run_daemon(
         first = false;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{CommonMappingFields, EntityMapping, FalkorConfig, Mode, NodeKeySpec, NodeMappingConfig, PropertySpec, SourceConfig, StateBackendKind, StateConfig};
+    use std::collections::HashMap;
+
+    /// Optional end-to-end test that loads a small JSON file into FalkorDB.
+    ///
+    /// Requires FALKORDB_ENDPOINT to be set. If it's missing, the test is skipped
+    /// by returning Ok(()) immediately.
+    #[tokio::test]
+    async fn end_to_end_file_load_into_falkordb() -> Result<()> {
+        let endpoint = match std::env::var("FALKORDB_ENDPOINT") {
+            Ok(v) => v,
+            Err(_) => return Ok(()),
+        };
+        let graph = std::env::var("FALKORDB_GRAPH")
+            .unwrap_or_else(|_| "snowflake_to_falkordb_load_test".to_string());
+
+        // Prepare a tiny in-memory config pointing at a temp JSON file.
+        let tmp_dir = std::env::temp_dir();
+        let input_path = tmp_dir.join("snowflake_to_falkordb_nodes.json");
+        std::fs::write(
+            &input_path,
+            r#"[
+                {"id": 1, "name": "Alice"},
+                {"id": 2, "name": "Bob"}
+            ]"#,
+        )?;
+
+        let source = SourceConfig {
+            file: Some(input_path.to_string_lossy().to_string()),
+            table: None,
+            select: None,
+            r#where: None,
+        };
+
+        let common = CommonMappingFields {
+            name: "test_nodes".to_string(),
+            source,
+            mode: Mode::Full,
+            delta: None,
+        };
+
+        let key = NodeKeySpec {
+            column: "id".to_string(),
+            property: "id".to_string(),
+        };
+
+        let mut properties = HashMap::new();
+        properties.insert(
+            "name".to_string(),
+            PropertySpec {
+                column: "name".to_string(),
+            },
+        );
+
+        let node_mapping = NodeMappingConfig {
+            common,
+            labels: vec!["TestNode".to_string()],
+            key,
+            properties,
+        };
+
+        let cfg = Config {
+            snowflake: None,
+            falkordb: FalkorConfig {
+                endpoint,
+                graph,
+                max_unwind_batch_size: Some(10),
+            },
+            state: Some(StateConfig {
+                backend: StateBackendKind::File,
+                file_path: Some(std::env::temp_dir().join("snowflake_to_falkordb_state.json").to_string_lossy().to_string()),
+            }),
+            mappings: vec![EntityMapping::Node(node_mapping)],
+        };
+
+        run_once(&cfg, false, &[]).await?;
+        Ok(())
+    }
+}

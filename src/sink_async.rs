@@ -143,50 +143,50 @@ pub async fn write_edges_batch_async(
 
     // For simplicity: build match predicates from first match_on for from/to.
     // In a real system you'd iterate and build dynamic WHERE.
-    let from_match_key = &mapping.from.match_on.first()
+    let from_match_key = &mapping
+        .from
+        .match_on
+        .first()
         .context("from endpoint must specify at least one match_on")?
         .property;
-    let to_match_key = &mapping.to.match_on.first()
+    let to_match_key = &mapping
+        .to
+        .match_on
+        .first()
         .context("to endpoint must specify at least one match_on")?
         .property;
 
-    let (arrow_open, arrow_close) = match mapping.direction {
-        EdgeDirection::Out => ("", ">"),
-        EdgeDirection::In => ("<", ""),
-    };
-
-    let cypher = if let Some(edge_key_spec) = &mapping.key {
-        format!(
-            "UNWIND $rows AS row \
-             MATCH (src:{from_label} {{ {from_key}: row.from.{from_key} }}) \
-             MATCH (tgt:{to_label} {{ {to_key}: row.to.{to_key} }}) \
-             MERGE (src){arrow_open}-[r:{rel} {{ {ek}: row.edgeKey }}]{arrow_close}(tgt) \
-             SET r += row.props",
-            from_label = from_label,
-            to_label = to_label,
-            from_key = from_match_key,
-            to_key = to_match_key,
+    let merge_clause = match (&mapping.direction, &mapping.key) {
+        (EdgeDirection::Out, Some(edge_key_spec)) => format!(
+            "MERGE (src)-[r:{rel} {{ {ek}: row.edgeKey }}]->(tgt)",
             rel = mapping.relationship,
             ek = edge_key_spec.property,
-            arrow_open = arrow_open,
-            arrow_close = arrow_close,
-        )
-    } else {
-        format!(
-            "UNWIND $rows AS row \
-             MATCH (src:{from_label} {{ {from_key}: row.from.{from_key} }}) \
-             MATCH (tgt:{to_label} {{ {to_key}: row.to.{to_key} }}) \
-             MERGE (src){arrow_open}-[r:{rel}]{arrow_close}(tgt) \
-             SET r += row.props",
-            from_label = from_label,
-            to_label = to_label,
-            from_key = from_match_key,
-            to_key = to_match_key,
+        ),
+        (EdgeDirection::Out, None) => {
+            format!("MERGE (src)-[r:{rel}]->(tgt)", rel = mapping.relationship)
+        }
+        (EdgeDirection::In, Some(edge_key_spec)) => format!(
+            "MERGE (src)<-[r:{rel} {{ {ek}: row.edgeKey }}]-(tgt)",
             rel = mapping.relationship,
-            arrow_open = arrow_open,
-            arrow_close = arrow_close,
-        )
+            ek = edge_key_spec.property,
+        ),
+        (EdgeDirection::In, None) => {
+            format!("MERGE (src)<-[r:{rel}]-(tgt)", rel = mapping.relationship)
+        }
     };
+
+    let cypher = format!(
+        "UNWIND $rows AS row \
+         MATCH (src:{from_label} {{ {from_key}: row.from.{from_key} }}) \
+         MATCH (tgt:{to_label} {{ {to_key}: row.to.{to_key} }}) \
+         {merge_clause} \
+         SET r += row.props",
+        from_label = from_label,
+        to_label = to_label,
+        from_key = from_match_key,
+        to_key = to_match_key,
+        merge_clause = merge_clause,
+    );
 
     let rows_value = JsonValue::Array(
         batch
@@ -231,50 +231,50 @@ pub async fn delete_edges_batch_async(
     let from_label = from_labels.join(":");
     let to_label = to_labels.join(":");
 
-    let from_match_key = &mapping.from.match_on.first()
+    let from_match_key = &mapping
+        .from
+        .match_on
+        .first()
         .context("from endpoint must specify at least one match_on")?
         .property;
-    let to_match_key = &mapping.to.match_on.first()
+    let to_match_key = &mapping
+        .to
+        .match_on
+        .first()
         .context("to endpoint must specify at least one match_on")?
         .property;
 
-    let (arrow_open, arrow_close) = match mapping.direction {
-        EdgeDirection::Out => ("", ">"),
-        EdgeDirection::In => ("<", ""),
-    };
-
-    let cypher = if let Some(edge_key_spec) = &mapping.key {
-        format!(
-            "UNWIND $rows AS row \
-             MATCH (src:{from_label} {{ {from_key}: row.from.{from_key} }}) \
-             MATCH (tgt:{to_label} {{ {to_key}: row.to.{to_key} }}) \
-             MATCH (src){arrow_open}-[r:{rel} {{ {ek}: row.edgeKey }}]{arrow_close}(tgt) \
-             DELETE r",
-            from_label = from_label,
-            to_label = to_label,
-            from_key = from_match_key,
-            to_key = to_match_key,
+    let edge_match_clause = match (&mapping.direction, &mapping.key) {
+        (EdgeDirection::Out, Some(edge_key_spec)) => format!(
+            "MATCH (src)-[r:{rel} {{ {ek}: row.edgeKey }}]->(tgt)",
             rel = mapping.relationship,
             ek = edge_key_spec.property,
-            arrow_open = arrow_open,
-            arrow_close = arrow_close,
-        )
-    } else {
-        format!(
-            "UNWIND $rows AS row \
-             MATCH (src:{from_label} {{ {from_key}: row.from.{from_key} }}) \
-             MATCH (tgt:{to_label} {{ {to_key}: row.to.{to_key} }}) \
-             MATCH (src){arrow_open}-[r:{rel}]{arrow_close}(tgt) \
-             DELETE r",
-            from_label = from_label,
-            to_label = to_label,
-            from_key = from_match_key,
-            to_key = to_match_key,
+        ),
+        (EdgeDirection::Out, None) => {
+            format!("MATCH (src)-[r:{rel}]->(tgt)", rel = mapping.relationship)
+        }
+        (EdgeDirection::In, Some(edge_key_spec)) => format!(
+            "MATCH (src)<-[r:{rel} {{ {ek}: row.edgeKey }}]-(tgt)",
             rel = mapping.relationship,
-            arrow_open = arrow_open,
-            arrow_close = arrow_close,
-        )
+            ek = edge_key_spec.property,
+        ),
+        (EdgeDirection::In, None) => {
+            format!("MATCH (src)<-[r:{rel}]-(tgt)", rel = mapping.relationship)
+        }
     };
+
+    let cypher = format!(
+        "UNWIND $rows AS row \
+         MATCH (src:{from_label} {{ {from_key}: row.from.{from_key} }}) \
+         MATCH (tgt:{to_label} {{ {to_key}: row.to.{to_key} }}) \
+         {edge_match_clause} \
+         DELETE r",
+        from_label = from_label,
+        to_label = to_label,
+        from_key = from_match_key,
+        to_key = to_match_key,
+        edge_match_clause = edge_match_clause,
+    );
 
     let rows_value = JsonValue::Array(
         batch
@@ -506,5 +506,39 @@ where
                 )))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::FalkorConfig;
+
+    /// Optional FalkorDB connectivity smoke test.
+    ///
+    /// Uses environment variables:
+    /// - FALKORDB_ENDPOINT (e.g. "falkor://127.0.0.1:6379")
+    /// - FALKORDB_GRAPH (optional, defaults to "snowflake_to_falkordb_test")
+    ///
+    /// If FALKORDB_ENDPOINT is not set, the test is a no-op and returns Ok(()).
+    #[tokio::test]
+    async fn falkordb_connectivity_smoke_test() -> Result<()> {
+        let endpoint = match std::env::var("FALKORDB_ENDPOINT") {
+            Ok(v) => v,
+            Err(_) => return Ok(()),
+        };
+        let graph = std::env::var("FALKORDB_GRAPH")
+            .unwrap_or_else(|_| "snowflake_to_falkordb_test".to_string());
+
+        let cfg = FalkorConfig {
+            endpoint,
+            graph,
+            max_unwind_batch_size: Some(10),
+        };
+
+        let mut graph = connect_falkordb_async(&cfg).await?;
+        // Simple round-trip query
+        let _res = graph.query("RETURN 1").execute().await?;
+        Ok(())
     }
 }
