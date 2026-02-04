@@ -387,6 +387,7 @@ mod tests {
         let source = SourceConfig {
             file: Some(input_path.to_string_lossy().to_string()),
             table: None,
+            stream: None,
             select: None,
             r#where: None,
         };

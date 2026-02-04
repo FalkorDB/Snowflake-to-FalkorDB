@@ -48,7 +48,7 @@ async fn fetch_rows_from_snowflake(
     common: &CommonMappingFields,
     watermark: Option<&str>,
 ) -> Result<Vec<LogicalRow>> {
-    let sql = build_sql(common, watermark)?;
+    let base_sql = build_sql(common, watermark)?;
 
     let auth = if let Some(key_path) = &sf_cfg.private_key_path {
         // Key-pair auth: use private_key_path as encrypted PEM and password as key passphrase.
@@ -83,10 +83,28 @@ async fn fetch_rows_from_snowflake(
             .map(|ms| std::time::Duration::from_millis(ms)),
     };
 
-    // Create client and session, then run query
+    // Create client and session
     let client = SnowflakeClient::new(&sf_cfg.user, auth, config)?;
     let session = client.create_session().await?;
-    let rows = session.query(sql.as_str()).await?;
+
+    // If fetch_batch_size is set and we have a delta spec (incremental), use
+    // simple LIMIT/OFFSET paging ordered by the updated_at column. This keeps
+    // individual result sets bounded while preserving the same semantics as a
+    // single large query.
+    if let (Some(batch_size), Some(delta)) = (sf_cfg.fetch_batch_size, &common.delta) {
+        if batch_size > 0 && common.source.select.is_none() {
+            return fetch_rows_from_snowflake_paged(
+                &session,
+                &base_sql,
+                &delta.updated_at_column,
+                batch_size,
+            )
+            .await;
+        }
+    }
+
+    // Fallback: single query returning all rows.
+    let rows = session.query(base_sql.as_str()).await?;
 
     let logical_rows = rows
         .into_iter()
@@ -96,11 +114,69 @@ async fn fetch_rows_from_snowflake(
     Ok(logical_rows)
 }
 
+/// Fetch rows using LIMIT/OFFSET paging.
+///
+/// This is only used when:
+/// - `SnowflakeConfig.fetch_batch_size` is set to a positive value, and
+/// - `CommonMappingFields.delta` is present (so we have an updated_at column), and
+/// - `source.select` is not used (we control the generated SQL).
+async fn fetch_rows_from_snowflake_paged(
+    session: &snowflake_connector_rs::SnowflakeSession,
+    base_sql: &str,
+    order_column: &str,
+    batch_size: usize,
+) -> Result<Vec<LogicalRow>> {
+    let mut out = Vec::new();
+    let mut offset: usize = 0;
+
+    loop {
+        let paged_sql = format!(
+            "{base} ORDER BY {col} LIMIT {limit} OFFSET {offset}",
+            base = base_sql,
+            col = order_column,
+            limit = batch_size,
+            offset = offset,
+        );
+
+        // SnowflakeSession::query accepts &str / String (Into<QueryRequest>), so
+        // pass a string slice here.
+        let rows: Vec<SnowflakeRow> = session.query(paged_sql.as_str()).await?;
+        let chunk_len = rows.len();
+        if chunk_len == 0 {
+            break;
+        }
+
+        for row in rows {
+            out.push(snowflake_row_to_logical_row(row)?);
+        }
+
+        if chunk_len < batch_size {
+            break;
+        }
+
+        offset += chunk_len;
+    }
+
+    Ok(out)
+}
+
 fn build_sql(common: &CommonMappingFields, watermark: Option<&str>) -> Result<String> {
     // If the user provided a full SELECT, we respect it as-is. We don't attempt to inject
     // incremental predicates automatically here.
     if let Some(sel) = &common.source.select {
         return Ok(sel.clone());
+    }
+
+    // If a Snowflake stream is configured, generate a simple SELECT against the
+    // stream. Snowflake streams internally track changes, so we do not add
+    // watermark predicates here; optional `where` is still honored.
+    if let Some(stream) = &common.source.stream {
+        let mut sql = format!("SELECT * FROM {}", stream);
+        if let Some(w) = &common.source.r#where {
+            sql.push_str(" WHERE ");
+            sql.push_str(w);
+        }
+        return Ok(sql);
     }
 
     if let Some(table) = &common.source.table {
@@ -127,7 +203,7 @@ fn build_sql(common: &CommonMappingFields, watermark: Option<&str>) -> Result<St
     }
 
     Err(anyhow!(
-        "Snowflake source for mapping '{}' must specify `source.table` or `source.select`",
+        "Snowflake source for mapping '{}' must specify `source.table`, `source.stream` or `source.select`",
         common.name
     ))
 }
@@ -242,6 +318,7 @@ mod tests {
             source: SourceConfig {
                 file: None,
                 table: None,
+                stream: None,
                 select: Some("SELECT 1 AS ONE".to_string()),
                 r#where: None,
             },

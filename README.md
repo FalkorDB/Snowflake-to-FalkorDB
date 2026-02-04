@@ -119,11 +119,12 @@ mappings:
 Key points:
 
 - `source.table` + optional `source.where` are used to generate SELECT statements.
-- If `delta.updated_at_column` is set and a watermark exists, the tool adds:
+- `source.stream` can point at a Snowflake stream; the tool will generate `SELECT * FROM <stream>` (plus optional `WHERE`) and rely on the stream itself to expose only new/changed rows.
+- If `delta.updated_at_column` is set and a watermark exists **and** `source.table` is used, the tool adds:
   - `AND updated_at_column > '<last_watermark>'` to the query.
 - If `source.select` is used, the query is taken as-is (you manage watermark predicates manually).
 
-Watermarks per mapping are stored in the `state` backend (currently `file`), keyed by mapping name.
+Watermarks per mapping are stored in the `state` backend (currently `file`), keyed by mapping name. When `source.stream` is used, Snowflake manages change tracking internally for the stream; you can still use `delta.deleted_flag_column`/`deleted_flag_value` (for example, pointing at `METADATA$ACTION = 'DELETE'`) to let the loader translate stream events into node/edge deletes in FalkorDB.
 
 ## Running the tool
 
@@ -209,6 +210,31 @@ Two modes are supported via `SnowflakeConfig`:
    ```
 
 If `private_key_path` is set, the tool uses keypair auth; otherwise it falls back to password auth. One of `password` or `private_key_path` must be set.
+
+### Snowflake batch loading
+
+For large incremental loads you can control how many rows are fetched per round trip from Snowflake using `fetch_batch_size` on `SnowflakeConfig`:
+
+```yaml
+snowflake:
+  account: "MY_ACCOUNT"
+  user: "LOAD_USER"
+  password: "$SNOWFLAKE_PASSWORD"
+  warehouse: "WH"
+  database: "DB"
+  schema: "PUBLIC"
+  query_timeout_ms: 60000
+  fetch_batch_size: 10000   # optional; default is to fetch all rows in one query
+```
+
+When `fetch_batch_size` is set to a positive value and **all** of the following are true for a mapping:
+
+- `source.table` is used (not `source.select`), so the tool generates the `SELECT`.
+- A `delta` block is configured, with `updated_at_column` set.
+
+the tool will fetch rows from Snowflake in pages using `ORDER BY <updated_at_column> LIMIT <batch_size> OFFSET <n>`, appending all pages into a single in-memory batch for that mapping. This keeps each individual Snowflake result set bounded while preserving the same semantics as a single `SELECT` with the incremental predicate.
+
+If `fetch_batch_size` is not set, or if the mapping uses `source.select` (custom SQL) or has no `delta` block, the tool falls back to a single query that returns all rows for that mapping.
 
 ## Metrics and Monitoring
 

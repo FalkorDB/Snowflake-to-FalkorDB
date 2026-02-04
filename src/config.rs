@@ -55,17 +55,19 @@ pub enum StateBackendKind {
     None,
 }
 
-/// Source specification: currently supports file-based input; fields for Snowflake/table
-/// sources are present but not fully wired yet.
+/// Source specification: supports either a local JSON file, a Snowflake table,
+/// a Snowflake stream (for change tracking), or a custom SELECT statement.
 #[derive(Debug, Deserialize)]
 pub struct SourceConfig {
     /// Path to a JSON file containing an array of objects, each representing a row.
     pub file: Option<String>,
     /// Optional table name for Snowflake-based sources.
     pub table: Option<String>,
+    /// Optional Snowflake stream name for change tracking.
+    pub stream: Option<String>,
     /// Optional full SELECT statement for Snowflake-based sources.
     pub select: Option<String>,
-    /// Optional WHERE clause to append when generating a SELECT from `table`.
+    /// Optional WHERE clause to append when generating a SELECT from `table` or `stream`.
     #[serde(rename = "where")]
     pub r#where: Option<String>,
 }
