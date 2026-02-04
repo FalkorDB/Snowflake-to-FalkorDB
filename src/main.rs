@@ -1,4 +1,5 @@
 mod config;
+mod cypher;
 mod sink;
 mod sink_async;
 mod source;

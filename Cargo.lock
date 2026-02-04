@@ -422,12 +422,12 @@ dependencies = [
 
 [[package]]
 name = "falkordb"
-version = "0.1.11"
+version = "0.2.1"
+source = "git+https://github.com/FalkorDB/falkordb-rs.git#2d69df250980afc3b11d88833682448da3f3a960"
 dependencies = [
  "parking_lot",
  "redis",
  "regex",
- "serde_json",
  "strum",
  "thiserror",
  "tokio",

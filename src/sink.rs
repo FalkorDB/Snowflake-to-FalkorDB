@@ -1,10 +1,9 @@
-use std::collections::HashMap;
-
 use anyhow::Result;
-use falkordb::{FalkorClientBuilder, FalkorConnectionInfo, QueryParams, SyncGraph};
+use falkordb::{FalkorClientBuilder, FalkorConnectionInfo, SyncGraph};
 use serde_json::{Map as JsonMap, Value as JsonValue};
 
 use crate::config::{FalkorConfig, NodeMappingConfig};
+use crate::cypher::json_value_to_cypher_literal;
 
 /// Establish a blocking FalkorDB client and select the configured graph.
 pub fn connect_falkordb_sync(cfg: &FalkorConfig) -> Result<SyncGraph> {
@@ -40,13 +39,6 @@ pub fn write_nodes_batch_sync(
     }
 
     let label_clause = mapping.labels.join(":");
-    let cypher = format!(
-        "UNWIND $rows AS row \
-         MERGE (n:{labels} {{ {key_prop}: row.key }}) \
-         SET n += row.props",
-        labels = label_clause,
-        key_prop = mapping.key.property,
-    );
 
     let rows_value = JsonValue::Array(
         batch
@@ -60,13 +52,17 @@ pub fn write_nodes_batch_sync(
             .collect(),
     );
 
-    let mut params = HashMap::new();
-    params.insert("rows".to_string(), rows_value);
+    let rows_literal = json_value_to_cypher_literal(&rows_value);
+    let cypher = format!(
+        "UNWIND {rows} AS row \
+         MERGE (n:{labels} {{ {key_prop}: row.key }}) \
+         SET n += row.props",
+        rows = rows_literal,
+        labels = label_clause,
+        key_prop = mapping.key.property,
+    );
 
-    let _res = graph
-        .query(&cypher)
-        .with_params(QueryParams::Json(&params))
-        .execute()?;
+    let _res = graph.query(&cypher).execute()?;
 
     Ok(())
 }

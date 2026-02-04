@@ -1,13 +1,13 @@
-use std::collections::HashMap;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use falkordb::{AsyncGraph, FalkorAsyncClient, FalkorClientBuilder, FalkorConnectionInfo, QueryParams};
+use falkordb::{AsyncGraph, FalkorAsyncClient, FalkorClientBuilder, FalkorConnectionInfo};
 use serde_json::{Map as JsonMap, Value as JsonValue};
 use tokio::time::sleep;
 
 use crate::config::{EdgeDirection, EdgeMappingConfig, FalkorConfig, NodeMappingConfig};
 use crate::sink::MappedNode;
+use crate::cypher::json_value_to_cypher_literal;
 
 /// Async connection to FalkorDB.
 pub async fn connect_falkordb_async(cfg: &FalkorConfig) -> Result<AsyncGraph> {
@@ -41,13 +41,6 @@ pub async fn write_nodes_batch_async(
     }
 
     let label_clause = mapping.labels.join(":");
-    let cypher = format!(
-        "UNWIND $rows AS row \
-         MERGE (n:{labels} {{ {key_prop}: row.key }}) \
-         SET n += row.props",
-        labels = label_clause,
-        key_prop = mapping.key.property,
-    );
 
     let rows_value = JsonValue::Array(
         batch
@@ -61,14 +54,17 @@ pub async fn write_nodes_batch_async(
             .collect(),
     );
 
-    let mut params = HashMap::new();
-    params.insert("rows".to_string(), rows_value);
+    let rows_literal = json_value_to_cypher_literal(&rows_value);
+    let cypher = format!(
+        "UNWIND {rows} AS row \
+         MERGE (n:{labels} {{ {key_prop}: row.key }}) \
+         SET n += row.props",
+        rows = rows_literal,
+        labels = label_clause,
+        key_prop = mapping.key.property,
+    );
 
-    let _res = graph
-        .query(&cypher)
-        .with_params(QueryParams::Json(&params))
-        .execute()
-        .await?;
+    let _res = graph.query(&cypher).execute().await?;
 
     Ok(())
 }
@@ -84,13 +80,6 @@ pub async fn delete_nodes_batch_async(
     }
 
     let label_clause = mapping.labels.join(":");
-    let cypher = format!(
-        "UNWIND $rows AS row \
-         MATCH (n:{labels} {{ {key_prop}: row.key }}) \
-         DETACH DELETE n",
-        labels = label_clause,
-        key_prop = mapping.key.property,
-    );
 
     let rows_value = JsonValue::Array(
         batch
@@ -103,14 +92,17 @@ pub async fn delete_nodes_batch_async(
             .collect(),
     );
 
-    let mut params = HashMap::new();
-    params.insert("rows".to_string(), rows_value);
+    let rows_literal = json_value_to_cypher_literal(&rows_value);
+    let cypher = format!(
+        "UNWIND {rows} AS row \
+         MATCH (n:{labels} {{ {key_prop}: row.key }}) \
+         DETACH DELETE n",
+        rows = rows_literal,
+        labels = label_clause,
+        key_prop = mapping.key.property,
+    );
 
-    let _res = graph
-        .query(&cypher)
-        .with_params(QueryParams::Json(&params))
-        .execute()
-        .await?;
+    let _res = graph.query(&cypher).execute().await?;
 
     Ok(())
 }
@@ -204,14 +196,22 @@ pub async fn write_edges_batch_async(
             .collect(),
     );
 
-    let mut params = HashMap::new();
-    params.insert("rows".to_string(), rows_value);
+    let rows_literal = json_value_to_cypher_literal(&rows_value);
+    let cypher = format!(
+        "UNWIND {rows} AS row \
+         MATCH (src:{from_label} {{ {from_key}: row.from.{from_key} }}) \
+         MATCH (tgt:{to_label} {{ {to_key}: row.to.{to_key} }}) \
+         {merge_clause} \
+         SET r += row.props",
+        rows = rows_literal,
+        from_label = from_label,
+        to_label = to_label,
+        from_key = from_match_key,
+        to_key = to_match_key,
+        merge_clause = merge_clause,
+    );
 
-    let _res = graph
-        .query(&cypher)
-        .with_params(QueryParams::Json(&params))
-        .execute()
-        .await?;
+    let _res = graph.query(&cypher).execute().await?;
 
     Ok(())
 }
@@ -291,14 +291,22 @@ pub async fn delete_edges_batch_async(
             .collect(),
     );
 
-    let mut params = HashMap::new();
-    params.insert("rows".to_string(), rows_value);
+    let rows_literal = json_value_to_cypher_literal(&rows_value);
+    let cypher = format!(
+        "UNWIND {rows} AS row \
+         MATCH (src:{from_label} {{ {from_key}: row.from.{from_key} }}) \
+         MATCH (tgt:{to_label} {{ {to_key}: row.to.{to_key} }}) \
+         {edge_match_clause} \
+         DELETE r",
+        rows = rows_literal,
+        from_label = from_label,
+        to_label = to_label,
+        from_key = from_match_key,
+        to_key = to_match_key,
+        edge_match_clause = edge_match_clause,
+    );
 
-    let _res = graph
-        .query(&cypher)
-        .with_params(QueryParams::Json(&params))
-        .execute()
-        .await?;
+    let _res = graph.query(&cypher).execute().await?;
 
     Ok(())
 }
