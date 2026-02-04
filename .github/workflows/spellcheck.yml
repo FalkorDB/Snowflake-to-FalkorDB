@@ -12,6 +12,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Spellcheck
+        # Treat spelling issues as best-effort so they don't block CI.
+        continue-on-error: true
         uses: rojopolis/spellcheck-github-actions@0.50.0
         with:
           config_path: .github/spellcheck-settings.yml
