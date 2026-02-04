@@ -5,23 +5,16 @@ use chrono::{DateTime, Utc};
 
 use crate::config::{Config, EntityMapping, NodeMappingConfig};
 use crate::mapping::{map_rows_to_edges, map_rows_to_nodes};
-use crate::sink_async::{
-    connect_falkordb_async,
-    write_edges_in_batches_async,
-    write_nodes_in_batches_async,
-    delete_nodes_in_batches_async,
-    delete_edges_in_batches_async,
-    MappedEdge,
-};
+use crate::metrics::METRICS;
 use crate::sink::MappedNode;
+use crate::sink_async::{
+    connect_falkordb_async, delete_edges_in_batches_async, delete_nodes_in_batches_async,
+    write_edges_in_batches_async, write_nodes_in_batches_async, MappedEdge,
+};
 use crate::source::{fetch_rows_for_mapping, LogicalRow};
 use crate::state::{load_watermarks, save_watermarks};
-use crate::metrics::METRICS;
 
-fn compute_max_watermark(
-    rows: &[LogicalRow],
-    updated_at_column: &str,
-) -> Option<DateTime<Utc>> {
+fn compute_max_watermark(rows: &[LogicalRow], updated_at_column: &str) -> Option<DateTime<Utc>> {
     use chrono::{NaiveDateTime, TimeZone};
     let mut max_ts: Option<DateTime<Utc>> = None;
 
@@ -52,17 +45,17 @@ fn compute_max_watermark(
     max_ts
 }
 
-fn partition_by_deleted<'a>(rows: &'a [LogicalRow], delta: &crate::config::DeltaSpec) -> (Vec<LogicalRow>, Vec<LogicalRow>) {
+fn partition_by_deleted<'a>(
+    rows: &'a [LogicalRow],
+    delta: &crate::config::DeltaSpec,
+) -> (Vec<LogicalRow>, Vec<LogicalRow>) {
     let mut active = Vec::new();
     let mut deleted = Vec::new();
 
     if let Some(flag_col) = &delta.deleted_flag_column {
         if let Some(flag_val) = &delta.deleted_flag_value {
             for row in rows {
-                let is_deleted = row
-                    .get(flag_col)
-                    .map(|v| v == flag_val)
-                    .unwrap_or(false);
+                let is_deleted = row.get(flag_col).map(|v| v == flag_val).unwrap_or(false);
                 if is_deleted {
                     deleted.push(row.clone());
                 } else {
@@ -147,7 +140,11 @@ async fn purge_mapping(
 }
 
 /// Run a single full or incremental synchronization over all mappings.
-pub async fn run_once(cfg: &Config, purge_graph_flag: bool, purge_mappings: &[String]) -> Result<()> {
+pub async fn run_once(
+    cfg: &Config,
+    purge_graph_flag: bool,
+    purge_mappings: &[String],
+) -> Result<()> {
     let mut graph = connect_falkordb_async(&cfg.falkordb).await?;
     let mut watermarks = load_watermarks(cfg)?;
 
@@ -177,11 +174,7 @@ pub async fn run_once(cfg: &Config, purge_graph_flag: bool, purge_mappings: &[St
         }
     }
 
-    let batch_size = cfg
-        .falkordb
-        .max_unwind_batch_size
-        .unwrap_or(1000)
-        .max(1);
+    let batch_size = cfg.falkordb.max_unwind_batch_size.unwrap_or(1000).max(1);
 
     // For now run mappings sequentially; concurrency can be added later.
     for mapping in &cfg.mappings {
@@ -190,9 +183,7 @@ pub async fn run_once(cfg: &Config, purge_graph_flag: bool, purge_mappings: &[St
                 tracing::info!(mapping = %node_cfg.common.name, "Processing node mapping");
                 METRICS.inc_mapping_run(&node_cfg.common.name);
 
-                let watermark = watermarks
-                    .get(&node_cfg.common.name)
-                    .map(|s| s.as_str());
+                let watermark = watermarks.get(&node_cfg.common.name).map(|s| s.as_str());
                 let rows = fetch_rows_for_mapping(cfg, &node_cfg.common, watermark).await?;
                 METRICS.add_rows_fetched(rows.len() as u64);
                 METRICS.add_mapping_rows_fetched(&node_cfg.common.name, rows.len() as u64);
@@ -211,11 +202,22 @@ pub async fn run_once(cfg: &Config, purge_graph_flag: bool, purge_mappings: &[St
                 write_nodes_in_batches_async(&mut graph, node_cfg, nodes, batch_size, 3).await?;
 
                 if !deleted_rows.is_empty() {
-                    let deleted_nodes: Vec<MappedNode> = map_rows_to_nodes(&deleted_rows, node_cfg)?;
+                    let deleted_nodes: Vec<MappedNode> =
+                        map_rows_to_nodes(&deleted_rows, node_cfg)?;
                     METRICS.add_rows_deleted(deleted_nodes.len() as u64);
-                    METRICS.add_mapping_rows_deleted(&node_cfg.common.name, deleted_nodes.len() as u64);
+                    METRICS.add_mapping_rows_deleted(
+                        &node_cfg.common.name,
+                        deleted_nodes.len() as u64,
+                    );
                     tracing::info!(mapping = %node_cfg.common.name, rows = deleted_nodes.len(), "Deleting nodes");
-                    delete_nodes_in_batches_async(&mut graph, node_cfg, deleted_nodes, batch_size, 3).await?;
+                    delete_nodes_in_batches_async(
+                        &mut graph,
+                        node_cfg,
+                        deleted_nodes,
+                        batch_size,
+                        3,
+                    )
+                    .await?;
                 }
 
                 if let Some(delta) = &node_cfg.common.delta {
@@ -261,9 +263,7 @@ pub async fn run_once(cfg: &Config, purge_graph_flag: bool, purge_mappings: &[St
                     .clone()
                     .unwrap_or_else(|| to_node.labels.clone());
 
-                let watermark = watermarks
-                    .get(&edge_cfg.common.name)
-                    .map(|s| s.as_str());
+                let watermark = watermarks.get(&edge_cfg.common.name).map(|s| s.as_str());
                 let rows = fetch_rows_for_mapping(cfg, &edge_cfg.common, watermark).await?;
                 METRICS.add_rows_fetched(rows.len() as u64);
                 METRICS.add_mapping_rows_fetched(&edge_cfg.common.name, rows.len() as u64);
@@ -291,9 +291,13 @@ pub async fn run_once(cfg: &Config, purge_graph_flag: bool, purge_mappings: &[St
                 .await?;
 
                 if !deleted_rows.is_empty() {
-                    let deleted_edges: Vec<MappedEdge> = map_rows_to_edges(&deleted_rows, edge_cfg)?;
+                    let deleted_edges: Vec<MappedEdge> =
+                        map_rows_to_edges(&deleted_rows, edge_cfg)?;
                     METRICS.add_rows_deleted(deleted_edges.len() as u64);
-                    METRICS.add_mapping_rows_deleted(&edge_cfg.common.name, deleted_edges.len() as u64);
+                    METRICS.add_mapping_rows_deleted(
+                        &edge_cfg.common.name,
+                        deleted_edges.len() as u64,
+                    );
                     tracing::info!(mapping = %edge_cfg.common.name, rows = deleted_edges.len(), "Deleting edges");
                     delete_edges_in_batches_async(
                         &mut graph,
@@ -357,7 +361,10 @@ pub async fn run_daemon(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{CommonMappingFields, EntityMapping, FalkorConfig, Mode, NodeKeySpec, NodeMappingConfig, PropertySpec, SourceConfig, StateBackendKind, StateConfig};
+    use crate::config::{
+        CommonMappingFields, EntityMapping, FalkorConfig, Mode, NodeKeySpec, NodeMappingConfig,
+        PropertySpec, SourceConfig, StateBackendKind, StateConfig,
+    };
     use std::collections::HashMap;
 
     /// Optional end-to-end test that loads a small JSON file into FalkorDB.
@@ -428,7 +435,12 @@ mod tests {
             },
             state: Some(StateConfig {
                 backend: StateBackendKind::File,
-                file_path: Some(std::env::temp_dir().join("snowflake_to_falkordb_state.json").to_string_lossy().to_string()),
+                file_path: Some(
+                    std::env::temp_dir()
+                        .join("snowflake_to_falkordb_state.json")
+                        .to_string_lossy()
+                        .to_string(),
+                ),
             }),
             mappings: vec![EntityMapping::Node(node_mapping)],
         };

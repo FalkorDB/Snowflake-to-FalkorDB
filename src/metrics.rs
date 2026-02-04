@@ -1,11 +1,11 @@
+use std::collections::HashMap;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
-use std::collections::HashMap;
 
-use hyper::{Body, Request, Response, Server};
 use hyper::service::{make_service_fn, service_fn};
+use hyper::{Body, Request, Response, Server};
 use once_cell::sync::Lazy;
 
 pub static METRICS: Lazy<Metrics> = Lazy::new(Metrics::default);
@@ -125,9 +125,8 @@ async fn handle_metrics(_req: Request<Body>) -> Result<Response<Body>, Infallibl
 }
 
 pub async fn serve_metrics(addr: SocketAddr) {
-    let make_svc = make_service_fn(|_conn| async {
-        Ok::<_, Infallible>(service_fn(handle_metrics))
-    });
+    let make_svc =
+        make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle_metrics)) });
 
     if let Err(e) = Server::bind(&addr).serve(make_svc).await {
         tracing::error!(error = %e, "metrics server error");

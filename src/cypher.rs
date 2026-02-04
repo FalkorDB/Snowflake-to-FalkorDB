@@ -16,10 +16,7 @@ pub fn json_value_to_cypher_literal(value: &JsonValue) -> String {
             format!("'{}'", escaped)
         }
         JsonValue::Array(arr) => {
-            let items: Vec<String> = arr
-                .iter()
-                .map(json_value_to_cypher_literal)
-                .collect();
+            let items: Vec<String> = arr.iter().map(json_value_to_cypher_literal).collect();
             format!("[{}]", items.join(", "))
         }
         JsonValue::Object(map) => {

@@ -1,7 +1,10 @@
 [advisories]
 
 [bans]
-multiple-versions = "deny"
+# For this CLI tool we allow multiple versions and only warn on them, since
+# some transitive crates (http, hyper, rand, etc.) commonly appear in more
+# than one version.
+multiple-versions = "warn"
 skip = [
     "wasi", 
     "getrandom",
@@ -22,6 +25,10 @@ skip = [
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
+# Allow the FalkorDB client git source used by this project.
+allow-git = [
+    "https://github.com/FalkorDB/falkordb-rs.git",
+]
 
 [licenses]
 exceptions = [

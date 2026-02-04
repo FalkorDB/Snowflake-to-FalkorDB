@@ -3,6 +3,7 @@ name = "snowflake_to_falkordb"
 version = "0.1.0"
 edition = "2021"
 description = "MVP tool to load tabular data into FalkorDB via UNWIND+MERGE"
+license = "MIT"
 
 [dependencies]
 anyhow = "1"

@@ -6,8 +6,8 @@ use serde_json::{Map as JsonMap, Value as JsonValue};
 use tokio::time::sleep;
 
 use crate::config::{EdgeDirection, EdgeMappingConfig, FalkorConfig, NodeMappingConfig};
-use crate::sink::MappedNode;
 use crate::cypher::json_value_to_cypher_literal;
+use crate::sink::MappedNode;
 
 /// Async connection to FalkorDB.
 pub async fn connect_falkordb_async(cfg: &FalkorConfig) -> Result<AsyncGraph> {

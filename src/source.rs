@@ -3,10 +3,7 @@ use std::fs;
 use anyhow::{anyhow, Context, Result};
 use serde_json::{Map as JsonMap, Value as JsonValue};
 use snowflake_connector_rs::{
-    SnowflakeAuthMethod,
-    SnowflakeClient,
-    SnowflakeClientConfig,
-    SnowflakeRow,
+    SnowflakeAuthMethod, SnowflakeClient, SnowflakeClientConfig, SnowflakeRow,
 };
 
 use crate::config::{CommonMappingFields, Config, SnowflakeConfig};
@@ -54,12 +51,7 @@ async fn fetch_rows_from_snowflake(
         // Key-pair auth: use private_key_path as encrypted PEM and password as key passphrase.
         let pem = std::fs::read_to_string(key_path)
             .with_context(|| format!("Failed to read Snowflake private key from {}", key_path))?;
-        let pass_bytes = sf_cfg
-            .password
-            .as_deref()
-            .unwrap_or("")
-            .as_bytes()
-            .to_vec();
+        let pass_bytes = sf_cfg.password.as_deref().unwrap_or("").as_bytes().to_vec();
         SnowflakeAuthMethod::KeyPair {
             encrypted_pem: pem,
             password: pass_bytes,
@@ -228,15 +220,16 @@ fn snowflake_row_to_logical_row(row: SnowflakeRow) -> Result<LogicalRow> {
 }
 
 fn load_rows_from_file(path: &str) -> Result<Vec<LogicalRow>> {
-    let contents = fs::read_to_string(path)
-        .with_context(|| format!("Failed to read input file {}", path))?;
+    let contents =
+        fs::read_to_string(path).with_context(|| format!("Failed to read input file {}", path))?;
 
     let value: JsonValue = serde_json::from_str(&contents)
         .with_context(|| format!("Failed to parse JSON input from {}", path))?;
 
-    let arr = value.as_array().cloned().ok_or_else(|| {
-        anyhow!("Expected top-level JSON array in input file {}", path)
-    })?;
+    let arr = value
+        .as_array()
+        .cloned()
+        .ok_or_else(|| anyhow!("Expected top-level JSON array in input file {}", path))?;
 
     let mut rows = Vec::with_capacity(arr.len());
     for (idx, v) in arr.into_iter().enumerate() {

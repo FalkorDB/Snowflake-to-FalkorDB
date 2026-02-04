@@ -1,12 +1,12 @@
 mod config;
 mod cypher;
+mod mapping;
+mod metrics;
+mod orchestrator;
 mod sink;
 mod sink_async;
 mod source;
-mod mapping;
-mod orchestrator;
 mod state;
-mod metrics;
 
 use std::path::PathBuf;
 
@@ -17,7 +17,7 @@ use tracing_subscriber::EnvFilter;
 
 use crate::config::Config;
 use crate::metrics::serve_metrics;
-use crate::orchestrator::{run_once, run_daemon};
+use crate::orchestrator::{run_daemon, run_once};
 
 /// CLI for phase 2+: supports multi-mapping, async writes, purge, and daemon mode.
 #[derive(Debug, Parser)]

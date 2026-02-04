@@ -10,14 +10,14 @@ use crate::source::LogicalRow;
 /// Normalise incoming JSON so that complex values (objects, nested arrays) are stringified.
 fn normalise_property_value(value: JsonValue) -> JsonValue {
     fn is_primitive(v: &JsonValue) -> bool {
-        matches!(v, JsonValue::Null | JsonValue::Bool(_) | JsonValue::Number(_) | JsonValue::String(_))
+        matches!(
+            v,
+            JsonValue::Null | JsonValue::Bool(_) | JsonValue::Number(_) | JsonValue::String(_)
+        )
     }
 
     match value {
-        JsonValue::Null
-        | JsonValue::Bool(_)
-        | JsonValue::Number(_)
-        | JsonValue::String(_) => value,
+        JsonValue::Null | JsonValue::Bool(_) | JsonValue::Number(_) | JsonValue::String(_) => value,
         JsonValue::Array(arr) => {
             if arr.iter().all(is_primitive) {
                 JsonValue::Array(arr)
@@ -47,13 +47,7 @@ pub fn map_rows_to_nodes(
         let key_raw = row
             .get(&mapping.key.column)
             .cloned()
-            .ok_or_else(|| {
-                anyhow!(
-                    "Row {} is missing key column '{}'",
-                    idx,
-                    mapping.key.column
-                )
-            })?;
+            .ok_or_else(|| anyhow!("Row {} is missing key column '{}'", idx, mapping.key.column))?;
         let key_value = normalise_property_value(key_raw);
 
         let mut props = JsonMap::new();
@@ -73,7 +67,10 @@ pub fn map_rows_to_nodes(
             props.insert(prop_name.clone(), val);
         }
 
-        out.push(MappedNode { key: key_value, props });
+        out.push(MappedNode {
+            key: key_value,
+            props,
+        });
     }
 
     Ok(out)
@@ -105,18 +102,11 @@ pub fn map_rows_to_edges(
         let to_props = build_match_props(row, &mapping.to.match_on)?;
 
         let edge_key = if let Some(edge_key_spec) = &mapping.key {
-            Some(
-                normalise_property_value(
-                    row.get(&edge_key_spec.column)
-                        .cloned()
-                        .ok_or_else(|| {
-                            anyhow!(
-                                "Missing column '{}' for edge key",
-                                edge_key_spec.column
-                            )
-                        })?,
-                ),
-            )
+            Some(normalise_property_value(
+                row.get(&edge_key_spec.column).cloned().ok_or_else(|| {
+                    anyhow!("Missing column '{}' for edge key", edge_key_spec.column)
+                })?,
+            ))
         } else {
             None
         };

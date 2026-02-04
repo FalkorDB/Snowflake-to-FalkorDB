@@ -192,10 +192,12 @@ impl Config {
             .to_lowercase();
 
         let mut cfg: Config = match ext.as_str() {
-            "yaml" | "yml" => serde_yaml::from_str(&contents)
-                .with_context(|| format!("Failed to parse YAML config from {}", path_ref.display()))?,
-            _ => serde_json::from_str(&contents)
-                .with_context(|| format!("Failed to parse JSON config from {}", path_ref.display()))?,
+            "yaml" | "yml" => serde_yaml::from_str(&contents).with_context(|| {
+                format!("Failed to parse YAML config from {}", path_ref.display())
+            })?,
+            _ => serde_json::from_str(&contents).with_context(|| {
+                format!("Failed to parse JSON config from {}", path_ref.display())
+            })?,
         };
 
         // Resolve Snowflake password from environment if the config uses a $VAR reference.

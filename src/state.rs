@@ -49,10 +49,7 @@ pub fn save_watermarks(cfg: &Config, map: &HashMap<String, String>) -> Result<()
         return Ok(());
     }
 
-    let path_str = backend_cfg
-        .file_path
-        .as_deref()
-        .unwrap_or("state.json");
+    let path_str = backend_cfg.file_path.as_deref().unwrap_or("state.json");
     let path = Path::new(path_str);
 
     let state = FileState {
