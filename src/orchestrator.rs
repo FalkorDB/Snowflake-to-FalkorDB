@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
@@ -76,6 +76,59 @@ fn partition_by_deleted<'a>(
 async fn purge_graph(graph: &mut falkordb::AsyncGraph) -> Result<()> {
     tracing::warn!("Purging entire graph prior to load");
     graph.query("MATCH (n) DETACH DELETE n").execute().await?;
+    Ok(())
+}
+
+/// Ensure indexes exist for node key properties used in MERGE/MATCH.
+///
+/// For each node mapping, we create an index on (labels, key.property). We de-duplicate
+/// by (labels, property) combination and treat failures as non-fatal (for example,
+/// when the index already exists on the server).
+async fn ensure_node_indexes(
+    graph: &mut falkordb::AsyncGraph,
+    mappings: &[EntityMapping],
+) -> Result<()> {
+    let mut seen: HashSet<(String, String)> = HashSet::new();
+
+    for mapping in mappings {
+        if let EntityMapping::Node(node_cfg) = mapping {
+            if node_cfg.labels.is_empty() {
+                continue;
+            }
+
+            let label_clause = node_cfg.labels.join(":");
+            let prop = node_cfg.key.property.clone();
+            let key = (label_clause.clone(), prop.clone());
+
+            if !seen.insert(key) {
+                continue;
+            }
+
+            let cypher = format!(
+                "CREATE INDEX ON :{labels}({prop})",
+                labels = label_clause,
+                prop = prop
+            );
+
+            tracing::info!(
+                mapping = %node_cfg.common.name,
+                labels = %label_clause,
+                property = %prop,
+                "Ensuring index for node label on key property",
+            );
+
+            if let Err(e) = graph.query(&cypher).execute().await {
+                tracing::warn!(
+                    mapping = %node_cfg.common.name,
+                    labels = %label_clause,
+                    property = %prop,
+                    error = %e,
+                    "Failed to create index for node label (it may already exist)",
+                );
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -173,6 +226,10 @@ pub async fn run_once(
             }
         }
     }
+
+    // Ensure we have indexes on node key properties before writing data. This improves
+    // MERGE/MATCH performance and is safe to run repeatedly.
+    ensure_node_indexes(&mut graph, &cfg.mappings).await?;
 
     let batch_size = cfg.falkordb.max_unwind_batch_size.unwrap_or(1000).max(1);
 
