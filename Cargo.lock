@@ -720,7 +720,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.2",
+ "socket2 0.5.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -1267,7 +1267,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.6.2",
+ "socket2 0.5.10",
  "thiserror",
  "tokio",
  "tracing",
@@ -1304,7 +1304,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.2",
+ "socket2 0.5.10",
  "tracing",
  "windows-sys 0.60.2",
 ]
@@ -1745,9 +1745,9 @@ checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 
 [[package]]
 name = "snowflake-connector-rs"
-version = "0.7.6"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "99a56c04d19f20b8bb9b87416f2de65a50d44ac9eb82d25185571f9b64195c9d"
+checksum = "376a3fb11794d3f07057a5f61a2f9f14011b0db88b5cae23ca5e33844cb6a64f"
 dependencies = [
  "base64",
  "chrono",
