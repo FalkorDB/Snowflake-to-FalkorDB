@@ -1,4 +1,11 @@
 [advisories]
+# For this CLI tool, we explicitly acknowledge and ignore the Marvin Attack
+# advisory on the rsa crate for now. The Snowflake client pulls this in as a
+# transient dependency, and we are not using it in a context where attackers
+# can observe fine-grained timing information.
+ignore = [
+    "RUSTSEC-2023-0071", # Marvin Attack on rsa
+]
 
 [bans]
 # For this CLI tool we allow multiple versions and only warn on them, since
@@ -44,6 +51,9 @@ allow = [
     "MIT",
     "ISC",
     "Unicode-3.0",
+    # Snowflake connector and related components may use CDLA-Permissive-2.0.
+    # This is acceptable for this CLI tool.
+    "CDLA-Permissive-2.0",
 ]
 
 
