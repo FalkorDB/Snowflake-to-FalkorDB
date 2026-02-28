@@ -1,5 +1,9 @@
 # Snowflake-to-FalkorDB Migration Tool
 
+> [!WARNING]
+> Further development of this tool is happening in the `DM-SQL-to-FalkorDB` repository:
+> https://github.com/FalkorDB/DM-SQL-to-FalkorDB
+
 Rust-based CLI to migrate and continuously sync structured data from Snowflake into a FalkorDB graph, using a declarative mapping.
 
 ## Features
